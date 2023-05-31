@@ -307,9 +307,14 @@ bool AggregatorClient::GenFinalProof (const aggregator::v1::GenFinalProofRequest
     zklog.info("AggregatorClient::GenFinalProof() created a new prover request: " + to_string((uint64_t)pProverRequest));
 #endif
 
-    // Set the input
-    pProverRequest->finalProofInput = json::parse(genFinalProofRequest.recursive_proof());
-
+    try {
+        // Set the input
+        pProverRequest->finalProofInput = json::parse(genFinalProofRequest.recursive_proof());
+    } catch (json::parse_error& ex) {
+        cerr << "Error: AggregatorClient::GenFinalProof() parse recursive_proof, recursive_proof=" << genFinalProofRequest.recursive_proof() << endl;
+        genFinalProofResponse.set_result(aggregator::v1::Result::RESULT_ERROR);
+        return false;
+    }
     // Set the aggregator address
     string auxString = Remove0xIfPresent(genFinalProofRequest.aggregator_addr());
     if (auxString.size() > 40)
