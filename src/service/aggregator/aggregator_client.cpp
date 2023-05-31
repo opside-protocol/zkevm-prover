@@ -274,10 +274,23 @@ bool AggregatorClient::GenAggregatedProof (const aggregator::v1::GenAggregatedPr
 #ifdef LOG_SERVICE
     zklog.info("AggregatorClient::GenAggregatedProof() created a new prover request: " + to_string((uint64_t)pProverRequest));
 #endif
+    try {
+        // Set the 2 inputs
+        pProverRequest->aggregatedProofInput1 = json::parse(genAggregatedProofRequest.recursive_proof_1());
+    } catch (json::parse_error& ex) {
+        cerr << "Error: AggregatorClient::GenAggregatedProof() parse recursive_proof, recursive_proof1=" << genAggregatedProofRequest.recursive_proof_1() << endl;
+        genAggregatedProofResponse.set_result(aggregator::v1::Result::RESULT_ERROR);
+        return false;
+    }
 
-    // Set the 2 inputs
-    pProverRequest->aggregatedProofInput1 = json::parse(genAggregatedProofRequest.recursive_proof_1());
-    pProverRequest->aggregatedProofInput2 = json::parse(genAggregatedProofRequest.recursive_proof_2());
+    try {
+        pProverRequest->aggregatedProofInput2 = json::parse(genAggregatedProofRequest.recursive_proof_2());
+    } catch (json::parse_error& ex) {
+        cerr << "Error: AggregatorClient::GenAggregatedProof() parse recursive_proof, recursive_proof2=" << genAggregatedProofRequest.recursive_proof_2() << endl;
+        genAggregatedProofResponse.set_result(aggregator::v1::Result::RESULT_ERROR);
+        return false;
+    }
+
 
     // Submit the prover request
     string uuid = prover.submitRequest(pProverRequest);
