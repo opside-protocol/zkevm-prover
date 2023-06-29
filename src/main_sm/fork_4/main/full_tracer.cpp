@@ -371,7 +371,7 @@ zkresult FullTracer::onError(Context &ctx, const RomCommand &cmd)
 
     // Intrinsic error should be set at tx level (not opcode)
     if ( (responseErrors.find(lastError) != responseErrors.end()) ||
-         (execution_trace.size() == 0) )
+         ((execution_trace.size() == 0) && call_trace.size() == 0) )
     {
         if (finalTrace.responses.size() > txCount)
         {
@@ -388,29 +388,41 @@ zkresult FullTracer::onError(Context &ctx, const RomCommand &cmd)
             zklog.error("FullTracer::onError() got error=" + lastError + " with txCount=" + to_string(txCount) + " but finalTrace.responses.size()=" + to_string(finalTrace.responses.size()));
             exitProcess();
         }
-    }
-
-    if (execution_trace.size() > 0)
-    {
-        execution_trace[execution_trace.size() - 1].error = lastError;
-    }
-
-    // Revert logs
-    uint64_t CTX = ctx.fr.toU64(ctx.pols.CTX[*ctx.pStep]);
-    mpz_class auxScalar;
-    zkr = getVarFromCtx(ctx, true, ctx.rom.lastCtxUsedOffset, auxScalar);
-    if (zkr != ZKR_SUCCESS)
-    {
-        zklog.error("FullTracer::onError() failed calling getVarFromCtx(ctx.rom.lastCtxUsedOffset)");
-        return zkr;
-    }
-    uint64_t lastContextUsed = auxScalar.get_ui();
-    for (uint64_t i=CTX; i<=lastContextUsed; i++)
-    {
-        if (logs.find(i) != logs.end())
+    } else {
+        if (execution_trace.size() > 0)
         {
-            logs.erase(i);
+            execution_trace[execution_trace.size() - 1].error = lastError;
         }
+
+        if (call_trace.size() > 0)
+        {
+            call_trace[call_trace.size() - 1].error = lastError;
+        }
+
+        // Revert logs
+        uint64_t CTX = ctx.fr.toU64(ctx.pols.CTX[*ctx.pStep]);
+        if (logs.find(CTX) != logs.end())
+        {
+            logs.erase(CTX);
+        }
+
+        // // Revert logs
+        // uint64_t CTX = ctx.fr.toU64(ctx.pols.CTX[*ctx.pStep]);
+        // mpz_class auxScalar;
+        // zkr = getVarFromCtx(ctx, true, ctx.rom.lastCtxUsedOffset, auxScalar);
+        // if (zkr != ZKR_SUCCESS)
+        // {
+        //     zklog.error("FullTracer::onError() failed calling getVarFromCtx(ctx.rom.lastCtxUsedOffset)");
+        //     return zkr;
+        // }
+        // uint64_t lastContextUsed = auxScalar.get_ui();
+        // for (uint64_t i=CTX; i<=lastContextUsed; i++)
+        // {
+        //     if (logs.find(i) != logs.end())
+        //     {
+        //         logs.erase(i);
+        //     }
+        // }
     }
 
 #ifdef LOG_FULL_TRACER_ON_ERROR
@@ -1112,25 +1124,25 @@ zkresult FullTracer::onOpcode(Context &ctx, const RomCommand &cmd)
     Opcode * prevTraceCall = (numOpcodes > 0) ? &call_trace.at(numOpcodes - 1) : NULL;
     Opcode * prevTraceExecution = (numOpcodes > 0) ? &execution_trace.at(numOpcodes - 1) : NULL;
 
-    // If is an ether transfer, don't add stop opcode to trace
-    if ( (singleInfo.opcode == opcodeInfo[0x00/*STOP*/].pName) &&
-        ( (prevTraceCall == NULL) || (opIncContext.find(prevTraceCall->opcode) != opIncContext.end()) ) )
-    {
-        zkr = getVarFromCtx(ctx, false, ctx.rom.bytecodeLengthOffset, auxScalar);
-        if (zkr != ZKR_SUCCESS)
-        {
-            zklog.error("FullTracer::onOpcode() failed calling getVarFromCtx(ctx.rom.bytecodeLengthOffset)");
-            return zkr;
-        }
-        if (auxScalar == 0)
-        {
-#ifdef LOG_TIME_STATISTICS
-            tmsop.add("getCodeName", TimeDiff(top));
-            tms.add("onOpcode", TimeDiff(t));
-#endif
-            return ZKR_SUCCESS;
-        }
-    }
+//     // If is an ether transfer, don't add stop opcode to trace
+//     if ( (singleInfo.opcode == opcodeInfo[0x00/*STOP*/].pName) &&
+//         ( (prevTraceCall == NULL) || (opIncContext.find(prevTraceCall->opcode) != opIncContext.end()) ) )
+//     {
+//         zkr = getVarFromCtx(ctx, false, ctx.rom.bytecodeLengthOffset, auxScalar);
+//         if (zkr != ZKR_SUCCESS)
+//         {
+//             zklog.error("FullTracer::onOpcode() failed calling getVarFromCtx(ctx.rom.bytecodeLengthOffset)");
+//             return zkr;
+//         }
+//         if (auxScalar == 0)
+//         {
+// #ifdef LOG_TIME_STATISTICS
+//             tmsop.add("getCodeName", TimeDiff(top));
+//             tms.add("onOpcode", TimeDiff(t));
+// #endif
+//             return ZKR_SUCCESS;
+//         }
+//     }
 
 #ifdef LOG_TIME_STATISTICS
     tmsop.add("getCodeName", TimeDiff(top));
@@ -1297,7 +1309,7 @@ zkresult FullTracer::onOpcode(Context &ctx, const RomCommand &cmd)
             return zkr;
         }
         
-        singleInfo.contract.gas = txGAS[depth].forwarded;
+        singleInfo.contract.gas = txGAS[depth].remaining;
 
         singleInfo.contract.type = "CALL";
     }
@@ -1592,9 +1604,11 @@ zkresult FullTracer::onOpcode(Context &ctx, const RomCommand &cmd)
         
     // If is an ether transfer, don't add stop opcode to trace
     bool bAddOpcode = true;
+    // if ( (singleInfo.op == 0x00 /*STOP*/) &&
+    //      ( (prevStep==NULL) || (opIncContext.find(prevStep->opcode) != opIncContext.end()) ) &&
+    //      ( (prevStep==NULL) || (opCall.find(prevStep->opcode) != opCall.end()) || ( (opCreate.find(prevStep->opcode) != opCreate.end()) && (prevStep->gas_cost <= 32000))))
     if ( (singleInfo.op == 0x00 /*STOP*/) &&
-         ( (prevStep==NULL) || (opIncContext.find(prevStep->opcode) != opIncContext.end()) ) &&
-         ( (prevStep==NULL) || (opCall.find(prevStep->opcode) != opCall.end()) || ( (opCreate.find(prevStep->opcode) != opCreate.end()) && (prevStep->gas_cost <= 32000))))
+         ( (prevStep==NULL) || ( (opCreate.find(prevStep->opcode) != opCreate.end()) && (prevStep->gas_cost <= 32000))))
     {
         zkr = getVarFromCtx(ctx, false, ctx.rom.bytecodeLengthOffset, auxScalar);
         if (zkr != ZKR_SUCCESS)
